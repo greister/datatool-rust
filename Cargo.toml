@@ -1,0 +1,13 @@
+[package]
+name = "datatool"
+version = "0.1.0"
+edition = "2021"
+description = "通达信VIP数据处理器 - Rust重写版"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+byteorder = "1"
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
