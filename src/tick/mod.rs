@@ -4,7 +4,9 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
 
-use crate::formats::tick::TickItem;
+const HTC_HEADER_SIZE: usize = 16;
+const STOCK_HEADER_SIZE: usize = 30;
+const VID_RECORD_SIZE: usize = 38;
 
 pub fn create_tick(vipdoc: &Path, start_date: &str, end_date: &str) -> Result<()> {
     let start: u32 = start_date
@@ -55,27 +57,33 @@ pub fn create_tick(vipdoc: &Path, start_date: &str, end_date: &str) -> Result<()
         }
 
         info!("处理分笔: {} ({})", name, file_date);
-        process_htc_file(&entry.path(), &newtick_dir)?;
+        process_htc_file_v4(&entry.path(), &newtick_dir)?;
     }
 
     println!("分笔数据转档完成: {} - {}", start_date, end_date);
     Ok(())
 }
 
-fn process_htc_file(htc_path: &Path, newtick_dir: &Path) -> Result<()> {
+fn process_htc_file_v4(htc_path: &Path, newtick_dir: &Path) -> Result<()> {
     let data = std::fs::read(htc_path)
         .with_context(|| format!("无法读取文件: {}", htc_path.display()))?;
 
-    if data.len() < 2 {
-        return Ok(());
+    if data.len() < HTC_HEADER_SIZE {
+        return Err(anyhow!("htc文件太小: {} bytes", data.len()));
     }
 
-    let stock_count = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let mut pos = 2usize;
+    let version = u32::from_le_bytes(data[0..4].try_into()?);
+    let file_date = u32::from_le_bytes(data[4..8].try_into()?);
+    let _file_date2 = u32::from_le_bytes(data[8..12].try_into()?);
+    let stock_count = u32::from_le_bytes(data[12..16].try_into()?) as usize;
 
-    for _ in 0..stock_count {
-        if pos + 20 > data.len() {
-            warn!("数据截断: pos={}, len={}", pos, data.len());
+    let file_prefix = &data[0..8];
+
+    let mut pos = HTC_HEADER_SIZE;
+
+    for i in 0..stock_count {
+        if pos + STOCK_HEADER_SIZE > data.len() {
+            warn!("数据截断: stock_idx={}, pos={}, len={}", i, pos, data.len());
             break;
         }
 
@@ -84,66 +92,72 @@ fn process_htc_file(htc_path: &Path, newtick_dir: &Path) -> Result<()> {
         let code = String::from_utf8_lossy(code_bytes)
             .trim_end_matches('\0')
             .to_string();
-        let _tick_date = u32::from_le_bytes(data[pos + 8..pos + 12].try_into()?);
-        let tick_size = u32::from_le_bytes(data[pos + 12..pos + 16].try_into()?);
-        let _unknown = u32::from_le_bytes(data[pos + 16..pos + 20].try_into()?);
-        pos += 20;
+        let _stock_date = u32::from_le_bytes(data[pos + 8..pos + 12].try_into()?);
+        let decomp_size = u32::from_le_bytes(data[pos + 12..pos + 16].try_into()?);
+        let comp_size = u32::from_le_bytes(data[pos + 16..pos + 20].try_into()?);
 
-        if pos + tick_size as usize > data.len() {
-            warn!("分笔数据截断: code={}", code);
+        let compressed_data_start = pos + STOCK_HEADER_SIZE;
+
+        if compressed_data_start + comp_size as usize > data.len() {
+            warn!(
+                "压缩数据截断: code={}, need={} but available={}",
+                code,
+                comp_size,
+                data.len() - compressed_data_start
+            );
             break;
         }
 
-        let tick_data = &data[pos..pos + tick_size as usize];
-        pos += tick_size as usize;
+        let compressed_data =
+            &data[compressed_data_start..compressed_data_start + comp_size as usize];
 
-        let market_str = if market == 0 {
-            "sz"
-        } else if market == 1 {
-            "sh"
-        } else {
-            "bj"
+        let market_str = match market {
+            0 => "sz",
+            1 => "sh",
+            _ => "bj",
         };
 
-        write_tick_to_files(newtick_dir, market_str, &code, tick_data)?;
+        let prefix = format!("{}{}", market_str, code);
+
+        let mut vid_data = Vec::with_capacity(VID_RECORD_SIZE);
+        vid_data.extend_from_slice(file_prefix);
+        vid_data.extend_from_slice(&file_date.to_le_bytes());
+        vid_data.extend_from_slice(&1u16.to_le_bytes());
+        vid_data.extend_from_slice(&0u16.to_le_bytes());
+        vid_data.extend_from_slice(&data[pos + 8..pos + STOCK_HEADER_SIZE]);
+
+        write_tick_files(newtick_dir, &prefix, &vid_data, compressed_data)?;
+
+        pos = compressed_data_start + comp_size as usize;
     }
 
     Ok(())
 }
 
-fn write_tick_to_files(
+fn write_tick_files(
     newtick_dir: &Path,
-    market: &str,
-    code: &str,
-    tick_data: &[u8],
+    prefix: &str,
+    vid_header: &[u8],
+    compressed_data: &[u8],
 ) -> Result<()> {
-    if tick_data.len() < 20 {
-        return Ok(());
-    }
-
-    let prefix = format!("{}{}", market, code);
-
     let vid_path = newtick_dir.join(format!("{}.vid", prefix));
     let vtc_path = newtick_dir.join(format!("{}.vtc", prefix));
 
-    let vid_data = &tick_data[20..];
-
-    if !vid_data.is_empty() {
+    {
         let mut f = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&vid_path)?;
-        f.write_all(vid_data)?;
+        f.write_all(vid_header)?;
     }
 
-    let _header = TickItem::read_header(&mut std::io::Cursor::new(&tick_data[..20]))?;
-    let header_data = &tick_data[..20];
-
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&vtc_path)?;
-    f.write_all(header_data)?;
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&vtc_path)?;
+        f.write_all(compressed_data)?;
+    }
 
     Ok(())
 }
@@ -167,6 +181,17 @@ pub fn del_tick(vipdoc: &Path, start_date: &str, end_date: &str) -> Result<()> {
                     std::fs::remove_file(entry.path())?;
                     info!("删除分笔源文件: {}", name);
                 }
+            }
+        }
+    }
+
+    let newtick_dir = vipdoc.join("newtick");
+    if newtick_dir.exists() {
+        let entries = std::fs::read_dir(&newtick_dir)?;
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".vid") || name.ends_with(".vtc") {
+                std::fs::remove_file(entry.path())?;
             }
         }
     }
