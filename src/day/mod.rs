@@ -1,4 +1,4 @@
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};

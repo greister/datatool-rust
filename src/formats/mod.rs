@@ -1,4 +1,5 @@
 pub mod day;
+pub mod hashtable;
 pub mod min;
 pub mod tick;
 
@@ -101,14 +102,16 @@ impl MinRecord {
     }
 
     pub fn decode_date(date_raw: u16) -> (u32, u32, u32) {
-        let year = (date_raw as u32 >> 11) + 2004;
-        let month = (date_raw as u32 >> 7) & 0x0F;
-        let day = date_raw as u32 & 0x1F;
+        let v = date_raw as u32;
+        let year = v / 2048 + 2004;
+        let rem = v % 2048;
+        let month = rem / 100;
+        let day = rem % 100;
         (year, month, day)
     }
 
     pub fn encode_date(year: u32, month: u32, day: u32) -> u16 {
-        ((year - 2004) as u16) << 11 | ((month as u16) & 0x0F) << 7 | (day as u16 & 0x1F)
+        ((year - 2004) * 2048 + month * 100 + day) as u16
     }
 
     pub fn decode_time(time_raw: u16) -> (u32, u32) {

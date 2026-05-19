@@ -72,7 +72,7 @@ fn process_htc_file_v4(htc_path: &Path, newtick_dir: &Path) -> Result<()> {
         return Err(anyhow!("htc文件太小: {} bytes", data.len()));
     }
 
-    let version = u32::from_le_bytes(data[0..4].try_into()?);
+    let _version = u32::from_le_bytes(data[0..4].try_into()?);
     let file_date = u32::from_le_bytes(data[4..8].try_into()?);
     let _file_date2 = u32::from_le_bytes(data[8..12].try_into()?);
     let stock_count = u32::from_le_bytes(data[12..16].try_into()?) as usize;
@@ -93,7 +93,7 @@ fn process_htc_file_v4(htc_path: &Path, newtick_dir: &Path) -> Result<()> {
             .trim_end_matches('\0')
             .to_string();
         let _stock_date = u32::from_le_bytes(data[pos + 8..pos + 12].try_into()?);
-        let decomp_size = u32::from_le_bytes(data[pos + 12..pos + 16].try_into()?);
+        let _decomp_size = u32::from_le_bytes(data[pos + 12..pos + 16].try_into()?);
         let comp_size = u32::from_le_bytes(data[pos + 16..pos + 20].try_into()?);
 
         let compressed_data_start = pos + STOCK_HEADER_SIZE;
@@ -112,8 +112,8 @@ fn process_htc_file_v4(htc_path: &Path, newtick_dir: &Path) -> Result<()> {
             &data[compressed_data_start..compressed_data_start + comp_size as usize];
 
         let market_str = match market {
-            0 => "sz",
-            1 => "sh",
+            0 => "sh",
+            1 => "sz",
             _ => "bj",
         };
 
