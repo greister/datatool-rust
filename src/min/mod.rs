@@ -224,10 +224,10 @@ fn generate_all_min_records(vtc_data: &[u8], vid_data: &[u8]) -> Result<Vec<MinR
         if count > 1 {
             // Decode subsequent ticks from the bitstream
             let bitstream = &data[tick_detail_start..];
-            let vol_data = if vol_offset > 0 && tick_detail_start + vol_offset <= data.len() {
+            let vol_data = if tick_detail_start + vol_offset <= data.len() {
                 &data[tick_detail_start + vol_offset..]
             } else {
-                &data[data.len()..] // empty slice
+                &data[data.len()..]
             };
 
             let result = decode_tick_bitstream(
@@ -275,7 +275,7 @@ fn generate_all_min_records(vtc_data: &[u8], vid_data: &[u8]) -> Result<Vec<MinR
 
     for tick in &all_ticks {
         let time_raw = minutes_to_time_raw(tick.time);
-        let price_val = tick.price as u32;
+        let price_val = (tick.price / 100) as u32;
 
         let bar = minute_bars.entry(time_raw).or_insert_with(|| MinBar {
             time_raw,
@@ -332,17 +332,10 @@ fn generate_all_min_records(vtc_data: &[u8], vid_data: &[u8]) -> Result<Vec<MinR
 ///     afternoon timeVal 121-240 -> actual = 660+121=781 -> time_raw = 781-660 = 121
 fn minutes_to_time_raw(minutes_since_open: i32) -> u16 {
     if minutes_since_open >= 0 && minutes_since_open <= 120 {
-        // Morning session: 570 + minutes -> time_raw = minutes
-        minutes_since_open as u16
+        (570 + minutes_since_open) as u16
     } else if minutes_since_open > 120 && minutes_since_open <= 240 {
-        // Afternoon session: 660 + minutes -> time_raw = minutes
-        // The MinRecord time_raw for afternoon is 120+ when decoded:
-        // decode_time: if > 120 -> actual = 660 + time_raw
-        // So we need: actual = 660 + minutes_since_open = 660 + time_raw
-        // -> time_raw = minutes_since_open
-        minutes_since_open as u16
+        (660 + minutes_since_open) as u16
     } else {
-        // Invalid time, clamp
         minutes_since_open.max(0).min(240) as u16
     }
 }
@@ -768,18 +761,14 @@ mod tests {
 
     #[test]
     fn test_minutes_to_time_raw_morning() {
-        // 0 minutes = 9:30 -> time_raw = 0
-        assert_eq!(minutes_to_time_raw(0), 0);
-        // 120 minutes = 11:30 -> time_raw = 120
-        assert_eq!(minutes_to_time_raw(120), 120);
+        assert_eq!(minutes_to_time_raw(0), 570);
+        assert_eq!(minutes_to_time_raw(120), 690);
     }
 
     #[test]
     fn test_minutes_to_time_raw_afternoon() {
-        // 121 minutes = 13:01 -> time_raw = 121
-        assert_eq!(minutes_to_time_raw(121), 121);
-        // 240 minutes = 15:00 -> time_raw = 240
-        assert_eq!(minutes_to_time_raw(240), 240);
+        assert_eq!(minutes_to_time_raw(121), 781);
+        assert_eq!(minutes_to_time_raw(240), 900);
     }
 
     #[test]

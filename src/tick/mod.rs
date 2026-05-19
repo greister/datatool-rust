@@ -112,8 +112,8 @@ fn process_htc_file_v4(htc_path: &Path, newtick_dir: &Path) -> Result<()> {
             &data[compressed_data_start..compressed_data_start + comp_size as usize];
 
         let market_str = match market {
-            0 => "sh",
-            1 => "sz",
+            0 => "sz",
+            1 => "sh",
             _ => "bj",
         };
 
